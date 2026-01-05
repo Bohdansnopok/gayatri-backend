@@ -1,24 +1,58 @@
-// server.js - Додамо детальне логування
-import express from "express";
-import cors from "cors";
-import fs from "fs";
-import path from "path";
-import { v4 as uuid } from "uuid";
-import multer from "multer";
+// server.js - для Render (CommonJS)
+const express = require("express");
+const cors = require("cors");
+const fs = require("fs");
+const path = require("path");
+const { v4: uuid } = require("uuid");
+const multer = require("multer");
 
 const app = express();
-app.use(cors());
+
+// CORS для Vercel та локальної розробки
+const allowedOrigins = [
+  'https://gayatri-app.vercel.app', // ваш Vercel домен
+  'http://localhost:3000'
+];
+
+app.use(cors({
+  origin: function(origin, callback) {
+    // Дозволяємо всім для початку
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('Blocked by CORS:', origin);
+      callback(new Error('CORS not allowed'), false);
+    }
+  },
+  credentials: true
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Важливо: Використовуємо абсолютний шлях
-const uploadsDir = path.join(process.cwd(), 'uploads');
-console.log(`📂 Uploads directory: ${uploadsDir}`);
+// Налаштування для Render (використовуємо /tmp для продакшену)
+const __dirname = path.resolve();
+const uploadsDir = process.env.NODE_ENV === 'production'
+  ? path.join('/tmp', 'uploads')  // На Render використовуємо /tmp
+  : path.join(__dirname, 'uploads');
+  
+const mockDir = process.env.NODE_ENV === 'production'
+  ? path.join('/tmp', 'mock')     // На Render використовуємо /tmp
+  : path.join(__dirname, 'mock');
 
-// Перевіряємо чи існує папка uploads
+console.log(`📂 Environment: ${process.env.NODE_ENV || 'development'}`);
+console.log(`📂 Uploads directory: ${uploadsDir}`);
+console.log(`📂 Mock directory: ${mockDir}`);
+
+// Перевіряємо чи існують папки
 if (!fs.existsSync(uploadsDir)) {
   console.log(`📁 Creating uploads directory: ${uploadsDir}`);
   fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+if (!fs.existsSync(mockDir)) {
+  console.log(`📁 Creating mock directory: ${mockDir}`);
+  fs.mkdirSync(mockDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
@@ -39,16 +73,19 @@ const upload = multer({
 });
 
 const getCategoryPath = (category) => {
-  const mockDir = path.join(process.cwd(), 'mock');
-  if (!fs.existsSync(mockDir)) {
-    console.log(`📁 Creating mock directory: ${mockDir}`);
-    fs.mkdirSync(mockDir, { recursive: true });
-  }
-  
-  const filePath = path.join(mockDir, `${category.toLowerCase()}Cosmetic.json`);
+  const filePath = path.join(mockDir, `${category.toLowerCase()}.json`);
   console.log(`📄 Category file path: ${filePath}`);
   return filePath;
 };
+
+// Головний маршрут
+app.get("/", (req, res) => {
+  res.json({ 
+    message: "Gayatri API is running",
+    environment: process.env.NODE_ENV || 'development',
+    endpoints: ['/face', '/body', '/hair', '/decor', '/oils']
+  });
+});
 
 app.get("/:category", (req, res) => {
   try {
@@ -92,10 +129,6 @@ app.post("/:category", upload.single('image'), (req, res) => {
       console.log(`📏 File size: ${req.file.size} bytes`);
     }
 
-    if (req.file && !fs.existsSync(req.file.path)) {
-      console.error("❌ Uploaded file does not exist on disk!");
-    }
-
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : "";
     console.log(`🖼️ Image URL: ${imageUrl}`);
 
@@ -103,6 +136,7 @@ app.post("/:category", upload.single('image'), (req, res) => {
       id: uuid(),
       name: String(req.body.name),
       price: Number(req.body.price),
+      mililitres: req.body.mililitres ? Number(req.body.mililitres) : 0,
       category: category.toLowerCase(),
       image: imageUrl,
     };
@@ -110,12 +144,6 @@ app.post("/:category", upload.single('image'), (req, res) => {
     console.log(`🆕 Product object:`, product);
 
     const filePath = getCategoryPath(category);
-    
-    const dirPath = path.dirname(filePath);
-    if (!fs.existsSync(dirPath)) {
-      console.log(`📁 Creating directory: ${dirPath}`);
-      fs.mkdirSync(dirPath, { recursive: true });
-    }
     
     let data = [];
     if (fs.existsSync(filePath)) {
@@ -126,12 +154,9 @@ app.post("/:category", upload.single('image'), (req, res) => {
         console.error(`❌ Error parsing JSON from ${filePath}:`, parseError);
         data = [];
       }
-    } else {
-      console.log(`📁 Creating new file: ${filePath}`);
     }
 
     data.push(product);
-
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     console.log(`✅ Product saved to ${filePath}`);
     
@@ -141,8 +166,7 @@ app.post("/:category", upload.single('image'), (req, res) => {
     console.error("❌ Error in POST:", error);
     res.status(500).json({ 
       error: "Internal server error",
-      details: error.message,
-      stack: error.stack
+      details: error.message
     });
   }
 });
@@ -175,6 +199,16 @@ app.delete("/:category/:id", (req, res) => {
 
     const deletedProduct = data.splice(productIndex, 1)[0];
 
+    // Видалити файл зображення
+    if (deletedProduct.image) {
+      const imageName = deletedProduct.image.replace('/uploads/', '');
+      const imagePath = path.join(uploadsDir, imageName);
+      if (fs.existsSync(imagePath)) {
+        fs.unlinkSync(imagePath);
+        console.log(`🗑️ Deleted image: ${imagePath}`);
+      }
+    }
+
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     
     console.log(`✅ Product ${id} deleted from ${category} successfully`);
@@ -189,10 +223,22 @@ app.delete("/:category/:id", (req, res) => {
   }
 });
 
+// Статичні файли (зображення)
 app.use('/uploads', express.static(uploadsDir));
+
+// Health check для Render
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK',
+    timestamp: new Date().toISOString()
+  });
+});
 
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📁 Uploads dir: ${uploadsDir}`);
+  console.log(`📁 Mock dir: ${mockDir}`);
+  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
