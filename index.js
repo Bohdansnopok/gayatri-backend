@@ -1,244 +1,245 @@
-// server.js - для Render (CommonJS)
-const express = require("express");
-const cors = require("cors");
-const fs = require("fs");
-const path = require("path");
-const { v4: uuid } = require("uuid");
-const multer = require("multer");
+import express from "express";
+import cors from "cors";
+import fs from "fs";
+import path from "path";
+import { v4 as uuidv4 } from "uuid";
+import multer from "multer";
+import { fileURLToPath } from "url";
 
 const app = express();
 
-// CORS для Vercel та локальної розробки
-const allowedOrigins = [
-  'https://gayatri-app.vercel.app', // ваш Vercel домен
-  'http://localhost:3000'
-];
+// ES module equivalent of __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 app.use(cors({
-  origin: function(origin, callback) {
-    // Дозволяємо всім для початку
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      console.log('Blocked by CORS:', origin);
-      callback(new Error('CORS not allowed'), false);
-    }
-  },
+  origin: "*", 
   credentials: true
 }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Налаштування для Render (використовуємо /tmp для продакшену)
-const __dirname = path.resolve();
-const uploadsDir = process.env.NODE_ENV === 'production'
-  ? path.join('/tmp', 'uploads')  // На Render використовуємо /tmp
-  : path.join(__dirname, 'uploads');
-  
-const mockDir = process.env.NODE_ENV === 'production'
-  ? path.join('/tmp', 'mock')     // На Render використовуємо /tmp
-  : path.join(__dirname, 'mock');
+// Remove the duplicate __dirname declaration on line 18
 
-console.log(`📂 Environment: ${process.env.NODE_ENV || 'development'}`);
-console.log(`📂 Uploads directory: ${uploadsDir}`);
-console.log(`📂 Mock directory: ${mockDir}`);
+const getUploadsDir = () => {
+  if (process.env.NODE_ENV === "production") {
+    const tmpDir = path.join("/tmp", "gayatri-uploads");
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    return tmpDir;
+  }
+  const localDir = path.join(__dirname, "uploads");
+  if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+  return localDir;
+};
 
-// Перевіряємо чи існують папки
-if (!fs.existsSync(uploadsDir)) {
-  console.log(`📁 Creating uploads directory: ${uploadsDir}`);
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+const getMockDir = () => {
+  if (process.env.NODE_ENV === "production") {
+    const tmpDir = path.join("/tmp", "gayatri-mock");
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    return tmpDir;
+  }
+  const localDir = path.join(__dirname, "mock");
+  if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+  return localDir;
+};
 
-if (!fs.existsSync(mockDir)) {
-  console.log(`📁 Creating mock directory: ${mockDir}`);
-  fs.mkdirSync(mockDir, { recursive: true });
-}
+const uploadsDir = getUploadsDir();
+const mockDir = getMockDir();
+
+console.log(" Gayatri Backend starting...");
+console.log(` Environment: ${process.env.NODE_ENV || "development"}`);
+console.log(` Uploads: ${uploadsDir}`);
+console.log(` Mock data: ${mockDir}`);
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    console.log(`📁 Destination: ${uploadsDir}`);
     cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
     const uniqueName = `${Date.now()}-${file.originalname}`;
-    console.log(`📄 File will be saved as: ${uniqueName}`);
     cb(null, uniqueName);
   }
 });
 
 const upload = multer({ 
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }
+  limits: { fileSize: 10 * 1024 * 1024 }
 });
 
 const getCategoryPath = (category) => {
-  const filePath = path.join(mockDir, `${category.toLowerCase()}.json`);
-  console.log(`📄 Category file path: ${filePath}`);
-  return filePath;
+  return path.join(mockDir, `${category.toLowerCase()}.json`);
 };
 
-// Головний маршрут
 app.get("/", (req, res) => {
+  res.json({
+    message: "Gayatri Shop API",
+    version: "1.0.0",
+    status: "running",
+    environment: process.env.NODE_ENV || "development",
+    endpoints: {
+      products: "/:category (face, body, hair, decor, oils)",
+      uploads: "/uploads/:filename",
+      health: "/health"
+    }
+  });
+});
+
+app.get("/health", (req, res) => {
   res.json({ 
-    message: "Gayatri API is running",
-    environment: process.env.NODE_ENV || 'development',
-    endpoints: ['/face', '/body', '/hair', '/decor', '/oils']
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
   });
 });
 
 app.get("/:category", (req, res) => {
   try {
-    const { category } = req.params;
-    console.log(`📥 GET /${category}`);
-    
+    const category = req.params.category.toLowerCase();
     const filePath = getCategoryPath(category);
     
+    console.log(` GET /${category}`);
+    
     if (!fs.existsSync(filePath)) {
-      console.log(`📄 File does not exist, creating empty array for ${category}`);
-      fs.writeFileSync(filePath, "[]", "utf-8");
+      fs.writeFileSync(filePath, JSON.stringify([]));
       return res.json([]);
     }
     
-    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    console.log(`📊 Found ${data.length} products in ${category}`);
-    res.json(data);
+    const data = fs.readFileSync(filePath, "utf8");
+    const products = JSON.parse(data);
+    
+    const productsWithFullUrl = products.map(product => ({
+      ...product,
+      image: product.image ? `${req.protocol}://${req.get("host")}${product.image}` : null
+    }));
+    
+    res.json(productsWithFullUrl);
+    
   } catch (error) {
-    console.error("❌ Error reading file:", error);
-    res.status(500).json({ error: "Failed to read data" });
+    console.error(" Error:", error);
+    res.status(500).json({ error: "Failed to load products" });
   }
 });
 
-app.post("/:category", upload.single('image'), (req, res) => {
+app.post("/:category", upload.single("image"), (req, res) => {
   try {
-    const { category } = req.params;
+    const category = req.params.category.toLowerCase();
+    const { name, price, mililitres } = req.body;
     
-    if (!req.body.name || !req.body.price) {
-      console.error("❌ Missing required fields");
-      return res.status(400).json({ 
-        error: "Name and price are required",
-        received: req.body
-      });
+    console.log(` POST /${category}`, { name, price, mililitres });
+    
+    if (!name || !price) {
+      return res.status(400).json({ error: "Name and price are required" });
     }
-
-    if (!req.file) {
-      console.warn("⚠️ No file uploaded");
-    } else {
-      console.log(`✅ File uploaded: ${req.file.filename}`);
-      console.log(`📁 File saved to: ${req.file.path}`);
-      console.log(`📏 File size: ${req.file.size} bytes`);
+    
+    let imageUrl = "";
+    if (req.file) {
+      imageUrl = `/uploads/${req.file.filename}`;
+      console.log(` Image saved: ${imageUrl}`);
     }
-
-    const imageUrl = req.file ? `/uploads/${req.file.filename}` : "";
-    console.log(`🖼️ Image URL: ${imageUrl}`);
-
-    const product = {
-      id: uuid(),
-      name: String(req.body.name),
-      price: Number(req.body.price),
-      mililitres: req.body.mililitres ? Number(req.body.mililitres) : 0,
-      category: category.toLowerCase(),
+    
+    const newProduct = {
+      id: uuidv4(),
+      name: String(name),
+      price: Number(price),
+      mililitres: mililitres ? Number(mililitres) : 0,
+      category: category,
       image: imageUrl,
+      createdAt: new Date().toISOString()
     };
-
-    console.log(`🆕 Product object:`, product);
-
+    
+    console.log(` New product:`, newProduct);
+    
     const filePath = getCategoryPath(category);
+    let products = [];
     
-    let data = [];
     if (fs.existsSync(filePath)) {
-      const fileContent = fs.readFileSync(filePath, "utf-8");
-      try {
-        data = JSON.parse(fileContent);
-      } catch (parseError) {
-        console.error(`❌ Error parsing JSON from ${filePath}:`, parseError);
-        data = [];
-      }
+      const data = fs.readFileSync(filePath, "utf8");
+      products = JSON.parse(data);
     }
-
-    data.push(product);
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    console.log(`✅ Product saved to ${filePath}`);
     
-    res.status(201).json(product);
+    products.push(newProduct);
+    fs.writeFileSync(filePath, JSON.stringify(products, null, 2));
+    
+    const responseProduct = {
+      ...newProduct,
+      image: imageUrl ? `${req.protocol}://${req.get("host")}${imageUrl}` : null
+    };
+    
+    res.status(201).json(responseProduct);
     
   } catch (error) {
-    console.error("❌ Error in POST:", error);
-    res.status(500).json({ 
-      error: "Internal server error",
-      details: error.message
-    });
+    console.error(" Error:", error);
+    res.status(500).json({ error: "Failed to add product" });
   }
 });
 
 app.delete("/:category/:id", (req, res) => {
   try {
-    const { category, id } = req.params;
-    console.log(`🗑️ DELETE /${category}/${id}`);
+    const category = req.params.category.toLowerCase();
+    const id = req.params.id;
+    
+    console.log(` DELETE /${category}/${id}`);
     
     const filePath = getCategoryPath(category);
     
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: "Category not found" });
     }
-
-    let data = [];
-    try {
-      const fileContent = fs.readFileSync(filePath, "utf-8");
-      data = JSON.parse(fileContent);
-    } catch (error) {
-      console.error("Error reading file:", error);
-      return res.status(500).json({ error: "Failed to read data" });
-    }
-
-    const productIndex = data.findIndex(product => product.id === id);
+    
+    const data = fs.readFileSync(filePath, "utf8");
+    let products = JSON.parse(data);
+    
+    const productIndex = products.findIndex(p => p.id === id);
     
     if (productIndex === -1) {
       return res.status(404).json({ error: "Product not found" });
     }
-
-    const deletedProduct = data.splice(productIndex, 1)[0];
-
-    // Видалити файл зображення
+    
+    const deletedProduct = products[productIndex];
+    
     if (deletedProduct.image) {
-      const imageName = deletedProduct.image.replace('/uploads/', '');
+      const imageName = deletedProduct.image.split("/").pop();
       const imagePath = path.join(uploadsDir, imageName);
       if (fs.existsSync(imagePath)) {
         fs.unlinkSync(imagePath);
-        console.log(`🗑️ Deleted image: ${imagePath}`);
+        console.log(` Deleted image: ${imagePath}`);
       }
     }
-
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     
-    console.log(`✅ Product ${id} deleted from ${category} successfully`);
-    res.json(deletedProduct);
+    products.splice(productIndex, 1);
+    fs.writeFileSync(filePath, JSON.stringify(products, null, 2));
+    
+    console.log(` Product ${id} deleted from ${category}`);
+    res.json({ 
+      message: "Product deleted successfully",
+      deletedProduct 
+    });
     
   } catch (error) {
-    console.error("Error in DELETE:", error);
-    res.status(500).json({ 
-      error: "Internal server error",
-      details: error.message 
-    });
+    console.error(" Error:", error);
+    res.status(500).json({ error: "Failed to delete product" });
   }
 });
 
-// Статичні файли (зображення)
-app.use('/uploads', express.static(uploadsDir));
+app.use("/uploads", express.static(uploadsDir));
 
-// Health check для Render
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'OK',
-    timestamp: new Date().toISOString()
+app.use((req, res) => {
+  res.status(404).json({ error: "Route not found" });
+});
+
+app.use((err, req, res, next) => {
+  console.error(" Server error:", err);
+  res.status(500).json({ 
+    error: "Internal server error",
+    message: err.message 
   });
 });
 
 const PORT = process.env.PORT || 5000;
-
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📁 Uploads dir: ${uploadsDir}`);
-  console.log(`📁 Mock dir: ${mockDir}`);
-  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(` Server running on port ${PORT}`);
+  console.log(` Local: http://localhost:${PORT}`);
+  console.log(` Environment: ${process.env.NODE_ENV || "development"}`);
+  console.log("==========================================");
 });
