@@ -7,10 +7,6 @@ const fs = require("fs");
 
 const app = express();
 
-// ES module equivalent of __dirname
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 app.use(cors({
   origin: "*", 
   credentials: true
