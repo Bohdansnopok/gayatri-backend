@@ -7,15 +7,25 @@ const fs = require("fs");
 
 const app = express();
 
+const allowedOrigins = [
+  'https://gayatri-dusky.vercel.app',
+  'http://localhost:3000'
+];
+
 app.use(cors({
-  origin: "*", 
+  origin: function(origin, callback) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log(' Blocked by CORS:', origin);
+      callback(new Error('CORS not allowed'), false);
+    }
+  },
   credentials: true
 }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// Remove the duplicate __dirname declaration on line 18
 
 const getUploadsDir = () => {
   if (process.env.NODE_ENV === "production") {
