@@ -7,5 +7,14 @@
     "category": "oils",
     "image": "/uploads/1767619209475-intensiveGydrotation.jpg",
     "createdAt": "2026-01-05T13:20:09.495Z"
+  },
+  {
+    "id": "c644aacf-a636-4921-b942-fb40f89adb11",
+    "name": "jhj",
+    "price": 777,
+    "mililitres": 0,
+    "category": "oils",
+    "image": "/uploads/1767624088469-intensiveGydrotation.jpg",
+    "createdAt": "2026-01-05T14:41:28.485Z"
   }
 ]
