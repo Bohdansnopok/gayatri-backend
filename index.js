@@ -1,11 +1,9 @@
-import fs from "fs";
-import path from "path";
-import { v4 as uuidv4 } from "uuid";
-import multer from "multer";
-import { fileURLToPath } from "url";
-
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
+const { v4: uuidv4 } = require("uuid");
+const multer = require("multer");
+const fs = require("fs");
 
 const app = express();
 
